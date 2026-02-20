@@ -135,4 +135,12 @@ describe("Program initialization", () => {
     expect(config.discountBps.toString()).to.equal(discountBps.toString());
     expect(config.bump).to.equal(configBump);
   });
+
+  it("After initialization, vault RT account is correctly initialized", async () => {
+    const vaultAccount = await provider.connection.getAccountInfo(vaultRt);
+    expect(vaultAccount).to.not.be.null;
+    expect(vaultAccount?.owner.toString()).to.equal(anchor.utils.token.TOKEN_PROGRAM_ID.toString());
+    const vaultBalance = await provider.connection.getTokenAccountBalance(vaultRt);
+    expect(vaultBalance.value.uiAmount).to.equal(0);
+  });
 });
