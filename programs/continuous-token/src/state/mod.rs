@@ -1,3 +1,3 @@
-pub mod token_config;
+pub mod config;
 
-pub use token_config::*;
+pub use config::*;
