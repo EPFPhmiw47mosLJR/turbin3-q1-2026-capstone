@@ -30,6 +30,7 @@ pub struct Initialize<'info> {
         bump,
         mint::decimals = 8,
         mint::authority = config,
+        // mint::freeze_authority?
         mint::token_program = token_program_ct
     )]
     pub mint_ct: InterfaceAccount<'info, Mint>,
@@ -43,6 +44,23 @@ pub struct Initialize<'info> {
     )]
     pub vault_rt: InterfaceAccount<'info, TokenAccount>,
 
+    #[account(
+        init,
+        payer = initializer,
+        associated_token::mint = mint_ct,
+        associated_token::authority = config,
+        associated_token::token_program = token_program_ct,
+    )]
+    pub vault_ct_unlocked: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = initializer,
+        associated_token::mint = mint_ct,
+        associated_token::authority = config,
+        associated_token::token_program = token_program_ct,
+    )]
+    pub vault_ct_locked: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program_rt: Interface<'info, TokenInterface>,
     pub token_program_ct: Interface<'info, TokenInterface>,
@@ -61,6 +79,9 @@ impl<'info> Initialize<'info> {
         bumps: &InitializeBumps,
     ) -> Result<()> {
         require!(discount_bps < base_fee_bps, ContinuousTokenError::BadConfig);
+        require!(reserve_ratio_bps < 10_000, ContinuousTokenError::BadConfig);
+        require!(discount_bps < 10_000, ContinuousTokenError::BadConfig);
+        require!(base_fee_bps < 10_000, ContinuousTokenError::BadConfig);
 
         self.config.set_inner(Config {
             seed,

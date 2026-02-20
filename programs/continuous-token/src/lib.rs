@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
 
-mod state;
-mod instructions;
 mod error;
+mod instructions;
+mod state;
 
-pub use state::*;
-pub use instructions::*;
 pub use error::*;
+pub use instructions::*;
+pub use state::*;
 
 declare_id!("9KwgDXHGibr8yaGGMLPSvE6y7Yxfbkd8Rv4K7AkmCTgn");
 
@@ -30,5 +30,13 @@ pub mod continuous_token {
             discount_bps,
             &ctx.bumps,
         )
+    }
+
+    pub fn buy(ctx: Context<Buy>, amount: u64) -> Result<()> {
+        ctx.accounts.buy(amount)
+    }
+
+    pub fn sell(ctx: Context<Sell>, amount: u64) -> Result<()> {
+        ctx.accounts.sell(amount)
     }
 }
