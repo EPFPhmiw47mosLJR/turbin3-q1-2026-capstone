@@ -1,4 +1,8 @@
-use anchor_lang::{Lamports, prelude::*, system_program::{Transfer, transfer}};
+use anchor_lang::{
+    prelude::*,
+    system_program::{transfer, Transfer},
+    Lamports,
+};
 
 pub fn update_account_lamports_to_minimum_balance<'info>(
     account: AccountInfo<'info>,

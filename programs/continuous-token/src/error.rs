@@ -17,5 +17,5 @@ pub enum ContinuousTokenError {
     #[msg("Invalid Referrer ATA.")]
     InvalidReferrerAta,
     #[msg("Self Referral not allowed.")]
-    SelfReferralNotAllowed
+    SelfReferralNotAllowed,
 }
