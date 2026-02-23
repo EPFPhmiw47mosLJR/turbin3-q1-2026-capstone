@@ -18,4 +18,6 @@ pub enum ContinuousTokenError {
     InvalidReferrerAta,
     #[msg("Self Referral not allowed.")]
     SelfReferralNotAllowed,
+    #[msg("Incorrect Mint.")]
+    IncorrectMint,
 }

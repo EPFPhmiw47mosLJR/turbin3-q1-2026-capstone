@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
+    token_2022::MintToChecked,
     token_interface::{
-        mint_to, transfer_checked, Mint, MintTo, TokenAccount, TokenInterface, TransferChecked,
+        mint_to_checked, transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
     },
 };
 
@@ -19,16 +20,21 @@ pub struct Buy<'info> {
     )]
     pub config: Account<'info, Config>,
 
-    #[account(mint::token_program = token_program_rt)]
-    pub mint_rt: InterfaceAccount<'info, Mint>,
+    #[account(
+        mint::token_program = token_program_rt,
+        constraint = mint_rt.key() == config.mint_rt @ ContinuousTokenError::IncorrectMint
+    )]
+    pub mint_rt: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
+        mut,
         seeds = [b"ct", config.seed.to_le_bytes().as_ref()],
         bump,
         mint::authority = config,
         mint::token_program = token_program_ct,
+        constraint = mint_ct.key() == config.mint_ct @ ContinuousTokenError::IncorrectMint
     )]
-    pub mint_ct: InterfaceAccount<'info, Mint>,
+    pub mint_ct: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -36,7 +42,7 @@ pub struct Buy<'info> {
         associated_token::authority = config,
         associated_token::token_program = token_program_rt,
     )]
-    pub vault_rt: InterfaceAccount<'info, TokenAccount>,
+    pub vault_rt: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -44,15 +50,22 @@ pub struct Buy<'info> {
         associated_token::authority = config,
         associated_token::token_program = token_program_ct,
     )]
-    pub vault_ct_unlocked: InterfaceAccount<'info, TokenAccount>,
+    pub vault_ct_unlocked: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
         associated_token::mint = mint_ct,
-        associated_token::authority = config,
+        associated_token::authority = fee_vault_authority,
         associated_token::token_program = token_program_ct,
     )]
-    pub vault_ct_locked: InterfaceAccount<'info, TokenAccount>,
+    pub vault_ct_locked: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        seeds = [b"fee_vault", config.seed.to_le_bytes().as_ref()],
+        bump,
+    )]
+    /// CHECK: PDA authority only
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         mut,
@@ -74,12 +87,14 @@ pub struct Buy<'info> {
     #[account()]
     pub referrer: Option<SystemAccount<'info>>,
     #[account(
-        mut,
-        associated_token::mint = mint_rt,
+        // NOTE: Do you want to make the referrer already have made a purchase?
+        init_if_needed,
+        payer = buyer,
+        associated_token::mint = mint_ct,
         associated_token::authority = referrer,
-        associated_token::token_program = token_program_rt,
+        associated_token::token_program = token_program_ct,
     )]
-    pub referrer_rt_ata: Option<InterfaceAccount<'info, TokenAccount>>,
+    pub referrer_ct_ata: Option<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program_rt: Interface<'info, TokenInterface>,
     pub token_program_ct: Interface<'info, TokenInterface>,
@@ -96,7 +111,7 @@ impl<'info> Buy<'info> {
         );
         require!(amount > 0, ContinuousTokenError::InvalidAmount);
 
-        match (&self.referrer, &self.referrer_rt_ata) {
+        match (&self.referrer, &self.referrer_ct_ata) {
             (None, None) => {}
             (Some(referrer), Some(referrer_ata)) => {
                 require_keys_eq!(
@@ -119,6 +134,7 @@ impl<'info> Buy<'info> {
         let amount_u128 = amount as u128;
 
         let total_ct = Self::bonding_curve_buy(
+            self.mint_ct.decimals,
             self.config.first_price,
             self.config.reserve_ratio_bps,
             self.mint_ct.supply,
@@ -129,7 +145,7 @@ impl<'info> Buy<'info> {
             .try_into()
             .map_err(|_| ContinuousTokenError::Overflow)?;
 
-        let has_referrer = self.referrer_rt_ata.is_some();
+        let has_referrer = self.referrer_ct_ata.is_some();
 
         let final_fee_bps = if has_referrer {
             self.config
@@ -146,12 +162,6 @@ impl<'info> Buy<'info> {
             .checked_div(10_000)
             .ok_or(ContinuousTokenError::Overflow)?;
         let fee_u64: u64 = fee.try_into().map_err(|_| ContinuousTokenError::Overflow)?;
-
-        let (locked_ct_u64, referrer_ct_u64): (u64, u64) = if has_referrer {
-            (0u64, fee_u64)
-        } else {
-            (fee_u64, 0u64)
-        };
 
         let user_ct = total_ct
             .checked_sub(fee)
@@ -176,14 +186,14 @@ impl<'info> Buy<'info> {
 
             let ctx = CpiContext::new(cpi_program, cpi_accounts);
 
-            transfer_checked(ctx, fee_u64, self.mint_ct.decimals)?;
+            transfer_checked(ctx, amount, self.mint_rt.decimals)?;
         }
 
         {
             // Mint CT to temp
             let cpi_program = self.token_program_ct.to_account_info();
 
-            let cpi_accounts = MintTo {
+            let cpi_accounts = MintToChecked {
                 mint: self.mint_ct.to_account_info(),
                 to: self.vault_ct_unlocked.to_account_info(),
                 authority: self.config.to_account_info(),
@@ -191,7 +201,7 @@ impl<'info> Buy<'info> {
 
             let ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
 
-            mint_to(ctx, total_ct_u64)?;
+            mint_to_checked(ctx, total_ct_u64, self.mint_ct.decimals)?;
         }
 
         {
@@ -210,24 +220,24 @@ impl<'info> Buy<'info> {
             transfer_checked(ctx, user_ct_u64, self.mint_ct.decimals)?;
         }
 
-        match &self.referrer_rt_ata {
-            Some(referrer_rt_ata) => {
-                // Mint CT to Referrer
+        match &self.referrer_ct_ata {
+            Some(referrer_ct_ata) => {
+                // Transfer CT to Referrer
                 let cpi_program = self.token_program_ct.to_account_info();
 
                 let cpi_accounts = TransferChecked {
                     from: self.vault_ct_unlocked.to_account_info(),
                     mint: self.mint_ct.to_account_info(),
-                    to: referrer_rt_ata.to_account_info(),
+                    to: referrer_ct_ata.to_account_info(),
                     authority: self.config.to_account_info(),
                 };
 
                 let ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
 
-                transfer_checked(ctx, referrer_ct_u64, self.mint_ct.decimals)?;
+                transfer_checked(ctx, fee_u64, self.mint_ct.decimals)?;
             }
             None => {
-                // Mint CT to Locked Account
+                // Transfer CT to Locked Vault
                 let cpi_program = self.token_program_ct.to_account_info();
 
                 let cpi_accounts = TransferChecked {
@@ -239,7 +249,7 @@ impl<'info> Buy<'info> {
 
                 let ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
 
-                transfer_checked(ctx, locked_ct_u64, self.mint_ct.decimals)?;
+                transfer_checked(ctx, fee_u64, self.mint_ct.decimals)?;
             }
         }
 
@@ -247,12 +257,28 @@ impl<'info> Buy<'info> {
     }
 
     fn bonding_curve_buy(
-        k: u128,
+        decimals: u8,
+        first_price: u128,
         reserve_ratio_bps: u16,
         supply: u64,
         reserve: u64,
         amount: u128,
     ) -> Result<u128> {
-        todo!()
+        let alpha = (reserve_ratio_bps as f64) / 10_000.0_f64;
+        let scale = 10u128.pow(decimals as u32) as f64;
+
+        let k = if supply == 0 {
+            first_price as f64
+        } else {
+            (reserve as f64) / ((supply as f64) / scale).powf(1.0 / alpha)
+        };
+
+        let r_new = (reserve as f64) + (amount as f64);
+        let new_supply_f = (r_new / k).powf(alpha);
+        let new_supply_u = (new_supply_f * scale).floor() as u128;
+
+        let delta_s = new_supply_u.saturating_sub(supply as u128);
+
+        Ok(delta_s)
     }
 }

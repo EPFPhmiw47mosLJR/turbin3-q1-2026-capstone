@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{
-    burn, transfer_checked, Burn, Mint, TokenAccount, TokenInterface, TransferChecked,
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{
+        burn, transfer_checked, Burn, Mint, TokenAccount, TokenInterface, TransferChecked,
+    },
 };
 
 use crate::{state::Config, ContinuousTokenError};
@@ -16,16 +19,21 @@ pub struct Sell<'info> {
     )]
     pub config: Account<'info, Config>,
 
-    #[account(mint::token_program = token_program_rt)]
-    pub mint_rt: InterfaceAccount<'info, Mint>,
+    #[account(
+        mint::token_program = token_program_rt,
+        constraint = mint_rt.key() == config.mint_rt @ ContinuousTokenError::IncorrectMint
+    )]
+    pub mint_rt: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
+        mut,
         seeds = [b"ct", config.seed.to_le_bytes().as_ref()],
         bump,
         mint::authority = config,
         mint::token_program = token_program_ct,
+        constraint = mint_ct.key() == config.mint_ct @ ContinuousTokenError::IncorrectMint
     )]
-    pub mint_ct: InterfaceAccount<'info, Mint>,
+    pub mint_ct: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -33,7 +41,7 @@ pub struct Sell<'info> {
         associated_token::authority = config,
         associated_token::token_program = token_program_rt,
     )]
-    pub vault_rt: InterfaceAccount<'info, TokenAccount>,
+    pub vault_rt: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -41,7 +49,22 @@ pub struct Sell<'info> {
         associated_token::authority = config,
         associated_token::token_program = token_program_ct,
     )]
-    pub vault_ct_locked: InterfaceAccount<'info, TokenAccount>,
+    pub vault_ct_unlocked: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        mut,
+        associated_token::mint = mint_ct,
+        associated_token::authority = fee_vault_authority,
+        associated_token::token_program = token_program_ct,
+    )]
+    pub vault_ct_locked: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        seeds = [b"fee_vault", config.seed.to_le_bytes().as_ref()],
+        bump,
+    )]
+    /// CHECK: PDA authority only
+    pub fee_vault_authority: UncheckedAccount<'info>,
 
     #[account(
         mut,
@@ -52,7 +75,8 @@ pub struct Sell<'info> {
     pub seller_ct_ata: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
-        mut,
+        init_if_needed,
+        payer = seller,
         associated_token::mint = mint_rt,
         associated_token::authority = seller,
         associated_token::token_program = token_program_rt,
@@ -61,6 +85,8 @@ pub struct Sell<'info> {
 
     pub token_program_rt: Interface<'info, TokenInterface>,
     pub token_program_ct: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
 // CT in -> RT out
@@ -89,11 +115,11 @@ impl<'info> Sell<'info> {
             .map_err(|_| ContinuousTokenError::Overflow)?;
 
         let user_rt = Self::bonding_curve_sell(
-            self.config.first_price,
+            self.mint_rt.decimals,
             self.config.reserve_ratio_bps,
             self.mint_ct.supply,
             self.vault_rt.amount,
-            amount_u128,
+            net_amount,
         )?;
         let user_rt_u64 = user_rt
             .try_into()
@@ -154,12 +180,25 @@ impl<'info> Sell<'info> {
     }
 
     fn bonding_curve_sell(
-        k: u128,
+        decimals: u8,
         reserve_ratio_bps: u16,
         supply: u64,
         reserve: u64,
         amount: u128,
     ) -> Result<u128> {
-        todo!()
+        let alpha = (reserve_ratio_bps as f64) / 10_000.0_f64;
+        let scale = 10u128.pow(decimals as u32) as f64;
+
+        let k = (reserve as f64) / ((supply as f64) / scale).powf(1.0 / alpha);
+
+        let s_new = ((supply as f64) - (amount as f64)) / scale;
+        let r_new = k * s_new.powf(1.0 / alpha);
+        let delta_r = (reserve as f64) - r_new;
+
+        if !delta_r.is_finite() || delta_r <= 0.0 {
+            return Ok(0);
+        }
+
+        Ok(delta_r.floor() as u128)
     }
 }
