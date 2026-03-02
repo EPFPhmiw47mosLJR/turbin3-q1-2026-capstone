@@ -73,7 +73,7 @@ pub struct Buy<'info> {
         associated_token::authority = buyer,
         associated_token::token_program = token_program_rt,
     )]
-    pub buyer_rt_ata: InterfaceAccount<'info, TokenAccount>,
+    pub buyer_rt_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,

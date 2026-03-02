@@ -81,7 +81,7 @@ pub struct Sell<'info> {
         associated_token::authority = seller,
         associated_token::token_program = token_program_rt,
     )]
-    pub seller_rt_ata: InterfaceAccount<'info, TokenAccount>,
+    pub seller_rt_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program_rt: Interface<'info, TokenInterface>,
     pub token_program_ct: Interface<'info, TokenInterface>,
