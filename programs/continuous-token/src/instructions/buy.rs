@@ -16,7 +16,7 @@ pub struct Buy<'info> {
 
     #[account(
         seeds = [b"config", config.seed.to_le_bytes().as_ref()],
-        bump,
+        bump = config.bump,
     )]
     pub config: Account<'info, Config>,
 
@@ -29,7 +29,7 @@ pub struct Buy<'info> {
     #[account(
         mut,
         seeds = [b"ct", config.seed.to_le_bytes().as_ref()],
-        bump,
+        bump = config.mint_ct_bump,
         mint::authority = config,
         mint::token_program = token_program_ct,
         constraint = mint_ct.key() == config.mint_ct @ ContinuousTokenError::IncorrectMint
@@ -62,7 +62,7 @@ pub struct Buy<'info> {
 
     #[account(
         seeds = [b"fee_vault", config.seed.to_le_bytes().as_ref()],
-        bump,
+        bump = config.fee_vault_authority_bump,
     )]
     /// CHECK: PDA authority only
     pub fee_vault_authority: UncheckedAccount<'info>,
@@ -73,7 +73,7 @@ pub struct Buy<'info> {
         associated_token::authority = buyer,
         associated_token::token_program = token_program_rt,
     )]
-    pub buyer_rt_ata: InterfaceAccount<'info, TokenAccount>,
+    pub buyer_rt_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
