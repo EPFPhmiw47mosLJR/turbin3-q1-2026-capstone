@@ -15,9 +15,9 @@ import {
   buyAccounts,
   DEFAULT_INIT_CONFIG,
   deriveProgramAddresses,
-  devnet_closeAta,
-  devnet_drainSolTo,
   devnet_transferSol,
+  drainATAs,
+  drainSol,
   h_getMintAuto,
   h_getTokenAccountsAuto,
   h_getTokenAuto,
@@ -127,19 +127,26 @@ describe("Devnet Happy Path @devnet", () => {
     const destination = wallet.publicKey;
 
     // Close user token accounts
-    await devnet_closeAta(provider, userRtAta, user, destination);
-    await devnet_closeAta(provider, userCtAta, user, destination);
-    await devnet_closeAta(
+    await drainATAs(
       provider,
-      getAssociatedTokenAddressSync(mintRt, referrer.publicKey),
+      user,
+      destination,
+      [mintRt, addrs.ctMintPda],
+      0n,
+      true,
+    );
+    await drainATAs(
+      provider,
       referrer,
       destination,
+      [mintRt, addrs.ctMintPda],
+      0n,
+      true,
     );
-    await devnet_closeAta(provider, referrerCtAta, referrer, destination);
 
     // Drain remaining SOL
-    await devnet_drainSolTo(provider, user, destination);
-    await devnet_drainSolTo(provider, referrer, destination);
+    await drainSol(provider, user, destination);
+    await drainSol(provider, referrer, destination);
   });
 
   it("Buy with referrer succeeeds", async () => {

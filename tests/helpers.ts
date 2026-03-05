@@ -1,7 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  closeAccount,
   createAssociatedTokenAccountInstruction,
   createCloseAccountInstruction,
   createTransferInstruction,
@@ -270,8 +269,12 @@ export async function drainSol(
   leaveLamports = 5_000,
 ) {
   const balance = await provider.connection.getBalance(from.publicKey);
+  const rentExempt =
+    await provider.connection.getMinimumBalanceForRentExemption(0);
+  const fee = 5_000;
 
-  const lamportsToSend = Math.max(0, balance - leaveLamports);
+  const reserved = Math.max(leaveLamports, rentExempt + fee);
+  const lamportsToSend = Math.max(0, balance - reserved);
 
   if (lamportsToSend === 0) return;
 
@@ -360,7 +363,6 @@ export async function drainATAs(
       ),
     );
 
-    console.log("DRAIN: ", { close, leaveAmount, rawAmount, toSend });
     if (close && leaveAmount === 0n) {
       tx.add(
         createCloseAccountInstruction(
@@ -882,39 +884,4 @@ export async function devnet_transferSol(
     }),
   );
   await provider.sendAndConfirm(tx);
-}
-
-export async function devnet_drainSolTo(
-  provider: anchor.AnchorProvider,
-  keypair: anchor.web3.Keypair,
-  destination: anchor.web3.PublicKey,
-): Promise<void> {
-  const balance = await provider.connection.getBalance(keypair.publicKey);
-  const fee = 5000;
-  const rentExempt =
-    await provider.connection.getMinimumBalanceForRentExemption(0);
-  const sendable = balance - rentExempt - fee;
-  if (sendable <= 0) return;
-
-  const tx = new anchor.web3.Transaction().add(
-    anchor.web3.SystemProgram.transfer({
-      fromPubkey: keypair.publicKey,
-      toPubkey: destination,
-      lamports: sendable,
-    }),
-  );
-  await provider.sendAndConfirm(tx, [keypair]);
-}
-
-export async function devnet_closeAta(
-  provider: anchor.AnchorProvider,
-  ata: anchor.web3.PublicKey,
-  owner: anchor.web3.Keypair,
-  destination: anchor.web3.PublicKey,
-): Promise<void> {
-  try {
-    await closeAccount(provider.connection, owner, ata, destination, owner);
-  } catch {
-    // ignore
-  }
 }
