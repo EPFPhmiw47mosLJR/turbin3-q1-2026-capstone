@@ -124,6 +124,10 @@ impl<'info> Buy<'info> {
                     self.buyer.key(),
                     ContinuousTokenError::SelfReferralNotAllowed
                 );
+
+                require!(self.mint_ct.supply > 0, ContinuousTokenError::InvalidReferral);
+                let share_bps = referrer_ata.amount * 10_000 / self.mint_ct.supply;
+                require!(share_bps >= self.config.min_balance_for_referral_bps as u64, ContinuousTokenError::InvalidReferral);
             }
             _ => {
                 return err!(ContinuousTokenError::InvalidReferral);
