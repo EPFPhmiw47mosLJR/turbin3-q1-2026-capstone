@@ -269,8 +269,12 @@ export async function drainSol(
   leaveLamports = 5_000,
 ) {
   const balance = await provider.connection.getBalance(from.publicKey);
+  const rentExempt =
+    await provider.connection.getMinimumBalanceForRentExemption(0);
+  const fee = 5_000;
 
-  const lamportsToSend = Math.max(0, balance - leaveLamports);
+  const reserved = Math.max(leaveLamports, rentExempt + fee);
+  const lamportsToSend = Math.max(0, balance - reserved);
 
   if (lamportsToSend === 0) return;
 
@@ -359,7 +363,6 @@ export async function drainATAs(
       ),
     );
 
-    console.log("DRAIN: ", { close, leaveAmount, rawAmount, toSend });
     if (close && leaveAmount === 0n) {
       tx.add(
         createCloseAccountInstruction(
@@ -866,4 +869,19 @@ function getFeeVaultLockedPdaAddress(
     [Buffer.from("fee_vault"), seed.toArrayLike(Buffer, "le", 8)],
     programId,
   );
+}
+
+export async function devnet_transferSol(
+  provider: anchor.AnchorProvider,
+  to: anchor.web3.PublicKey,
+  lamports: number,
+): Promise<void> {
+  const tx = new anchor.web3.Transaction().add(
+    anchor.web3.SystemProgram.transfer({
+      fromPubkey: provider.wallet.publicKey,
+      toPubkey: to,
+      lamports,
+    }),
+  );
+  await provider.sendAndConfirm(tx);
 }
